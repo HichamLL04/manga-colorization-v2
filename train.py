@@ -18,6 +18,13 @@ Estructura de dataset esperada:
         color/   <- imágenes RGB (.jpg/.png)
         bw/      <- mismas en escala de grises (opcional; se genera on-the-fly)
 
+    Si se usó prepare_dataset.py con --multiply N, los ficheros tendrán la forma:
+        imagen_base.png
+        imagen_base_aug1.png
+        imagen_base_aug2.png
+        ...
+    En ese caso pasar --mult_number N para que cada epoch rote qué variante usa.
+
 Comandos de ejemplo:
     # Entrenamiento desde cero
     python train.py --path /ruta/dataset --gpu
@@ -32,8 +39,9 @@ Comandos de ejemplo:
     python train.py --path /ruta/dataset --gpu --resume checkpoint_epoch5.pth
 
     # Opciones avanzadas
-    python train.py --path /ruta/dataset --gpu --epochs 30 --batch_size 4 \
-                    --lr_gen 1e-4 --lr_disc 1e-4 --content_loss --crop_size 384
+    python train.py --path /ruta/dataset --gpu --epochs 30 --batch_size 4 \\
+                    --lr_gen 1e-4 --lr_disc 1e-4 --content_loss --crop_size 384 \\
+                    --save_every 2 --keep_last 3 --mult_number 3
 """
 
 import os
@@ -41,6 +49,7 @@ import glob
 import argparse
 import datetime
 import random
+import re
 
 import numpy as np
 import cv2
@@ -102,7 +111,7 @@ class ContentVGG(nn.Module):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# DATASET
+# AGRUPACIÓN DE VARIANTES (mult_number)
 # ──────────────────────────────────────────────────────────────────────────────
 
 EXTENSIONS = ('*.jpg', '*.jpeg', '*.png', '*.webp')
@@ -113,6 +122,58 @@ def _list_images(folder):
         files += glob.glob(os.path.join(folder, ext))
     return sorted(files)
 
+
+def _group_by_original(all_paths, mult_number):
+    """
+    Agrupa los paths por imagen original cuando el dataset fue generado con
+    prepare_dataset.py --multiply N.
+
+    Convención de nombres (la que usa prepare_dataset.py):
+        imagen_base.png          <- original (sin sufijo _augX)
+        imagen_base_aug1.png     <- variante 1
+        imagen_base_aug2.png     <- variante 2
+
+    Devuelve lista de grupos: [[original, aug1, aug2, ...], ...]
+    Con mult_number == 1 cada grupo tiene un solo elemento.
+    """
+    if mult_number <= 1:
+        return [[p] for p in all_paths]
+
+    aug_re    = re.compile(r'_aug\d+\.')
+    originals = [p for p in all_paths if not aug_re.search(os.path.basename(p))]
+    augmented = [p for p in all_paths if     aug_re.search(os.path.basename(p))]
+
+    # Indexar augmentadas por stem base: "imagen_base_aug1" -> "imagen_base"
+    aug_index = {}
+    for p in augmented:
+        stem = re.sub(r'_aug\d+', '', os.path.splitext(os.path.basename(p))[0])
+        aug_index.setdefault(stem, []).append(p)
+
+    groups = []
+    for orig in originals:
+        stem  = os.path.splitext(os.path.basename(orig))[0]
+        group = [orig] + sorted(aug_index.get(stem, []))
+        groups.append(group)
+
+    # Fallback: si no hay originales sin sufijo, tratar cada archivo como su propio grupo
+    if not groups:
+        return [[p] for p in all_paths]
+
+    return groups
+
+
+def _sample_epoch_paths(groups):
+    """
+    Por cada grupo de variantes elige UNA aleatoriamente.
+    El modelo ve cada imagen original exactamente una vez por epoch,
+    pero con una variante diferente cada vez → sin repetición monótona.
+    """
+    return [random.choice(group) for group in groups]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# DATASET
+# ──────────────────────────────────────────────────────────────────────────────
 
 class MangaDataset(Dataset):
     """
@@ -126,9 +187,12 @@ class MangaDataset(Dataset):
         hint_prob   : probabilidad de que un sample lleve hints de color
         max_hints   : número máximo de manchas de hint por imagen
         hint_radius : radio en píxeles de cada mancha
+        active_paths: lista de rutas color/ a usar este epoch (ya filtrada)
     """
     def __init__(self, data_path, crop_size=512, augment=True,
-                 hint_prob=0.7, max_hints=8, hint_radius=8):
+                 hint_prob=0.7, max_hints=8, hint_radius=8,
+                 active_paths=None):
+        self.data_path   = data_path
         self.crop_size   = crop_size
         self.augment     = augment
         self.hint_prob   = hint_prob
@@ -138,16 +202,19 @@ class MangaDataset(Dataset):
         color_dir = os.path.join(data_path, 'color')
         bw_dir    = os.path.join(data_path, 'bw')
 
-        self.color_paths = _list_images(color_dir)
-        if not self.color_paths:
+        all_paths = _list_images(color_dir)
+        if not all_paths:
             raise FileNotFoundError(f"No se encontraron imágenes en {color_dir}")
 
-        self.bw_dir = bw_dir if os.path.isdir(bw_dir) else None
-        print(f"[Dataset] {len(self.color_paths)} imágenes. "
-              f"Carpeta bw: {'encontrada' if self.bw_dir else 'no existe -> conversión on-the-fly'}")
+        self.bw_dir      = bw_dir if os.path.isdir(bw_dir) else None
+        self.color_paths = active_paths if active_paths is not None else all_paths
 
     def __len__(self):
         return len(self.color_paths)
+
+    def set_active_paths(self, paths):
+        """Reemplaza las rutas activas entre epochs sin recrear el objeto."""
+        self.color_paths = paths
 
     def _load_pair(self, idx):
         color_bgr = cv2.imread(self.color_paths[idx])
@@ -167,7 +234,6 @@ class MangaDataset(Dataset):
     def _random_crop(self, color, bw):
         h, w = color.shape[:2]
         cs   = self.crop_size
-        # Asegurar dimensiones mínimas
         if h < cs:
             factor = cs / h + 1e-3
             color  = cv2.resize(color, (int(w * factor), cs), interpolation=cv2.INTER_AREA)
@@ -184,10 +250,6 @@ class MangaDataset(Dataset):
         return color[top:top+cs, left:left+cs], bw[top:top+cs, left:left+cs]
 
     def _make_hint(self, color_norm):
-        """
-        color_norm: H x W x 3 en [-1, 1]
-        Devuelve: numpy 4 x H x W  [R*mask, G*mask, B*mask, mask]
-        """
         h, w = color_norm.shape[:2]
         hint_rgb  = np.zeros((h, w, 3), dtype=np.float32)
         hint_mask = np.zeros((h, w, 1), dtype=np.float32)
@@ -202,8 +264,8 @@ class MangaDataset(Dataset):
                 hint_rgb[y1:y2, x1:x2]  = avg
                 hint_mask[y1:y2, x1:x2] = 1.0
 
-        hint = np.concatenate([hint_rgb * hint_mask, hint_mask], axis=2)  # H x W x 4
-        return hint.transpose(2, 0, 1)  # 4 x H x W
+        hint = np.concatenate([hint_rgb * hint_mask, hint_mask], axis=2)
+        return hint.transpose(2, 0, 1)
 
     def __getitem__(self, idx):
         color, bw = self._load_pair(idx)
@@ -213,20 +275,15 @@ class MangaDataset(Dataset):
             color = np.fliplr(color).copy()
             bw    = np.fliplr(bw).copy()
 
-        # Normalizar a [-1, 1]
-        color_norm = (color.astype(np.float32) / 255.0 - 0.5) / 0.5   # H x W x 3
-        bw_norm    = (bw.astype(np.float32)    / 255.0 - 0.5) / 0.5   # H x W
+        color_norm = (color.astype(np.float32) / 255.0 - 0.5) / 0.5
+        bw_norm    = (bw.astype(np.float32)    / 255.0 - 0.5) / 0.5
 
-        hint = self._make_hint(color_norm)   # 4 x H x W
+        hint    = self._make_hint(color_norm)
+        color_t = torch.from_numpy(color_norm.transpose(2, 0, 1))
+        bw_t    = torch.from_numpy(bw_norm[np.newaxis])
+        hint_t  = torch.from_numpy(hint)
 
-        color_t = torch.from_numpy(color_norm.transpose(2, 0, 1))  # 3 x H x W
-        bw_t    = torch.from_numpy(bw_norm[np.newaxis])            # 1 x H x W
-        hint_t  = torch.from_numpy(hint)                           # 4 x H x W
-
-        # Input del generator: [bw(1) + hint(4)] = 5 canales
-        gen_input = torch.cat([bw_t, hint_t], dim=0)   # 5 x H x W
-
-        return gen_input, color_t
+        return torch.cat([bw_t, hint_t], dim=0), color_t
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -252,9 +309,27 @@ def compute_generator_loss(logits_fake, fake, guide, real,
     return total
 
 def compute_discriminator_loss(logits_real, logits_fake):
-    real_loss = _bce(logits_real, torch.full_like(logits_real, 0.9))  # label smoothing
+    real_loss = _bce(logits_real, torch.full_like(logits_real, 0.9))
     fake_loss = _bce(logits_fake, torch.zeros_like(logits_fake))
     return real_loss + fake_loss
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# LIMPIEZA DE CHECKPOINTS
+# ──────────────────────────────────────────────────────────────────────────────
+
+def cleanup_checkpoints(output_dir, keep_last):
+    """Borra checkpoints antiguos manteniendo solo los keep_last más recientes."""
+    if keep_last <= 0:
+        return
+    for pattern in (r'checkpoint_epoch(\d+)\.pth', r'generator_epoch(\d+)\.pth'):
+        files = sorted(
+            [f for f in os.listdir(output_dir) if re.match(pattern, f)],
+            key=lambda f: int(re.search(r'\d+', f).group())
+        )
+        for f in files[:-keep_last]:
+            os.remove(os.path.join(output_dir, f))
+            print(f'  [Limpieza] Borrado: {f}')
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -267,40 +342,54 @@ def train(args):
     if args.gpu and not torch.cuda.is_available():
         print("[Train] AVISO: --gpu activado pero CUDA no disponible. Usando CPU.")
 
-    # Dataset
-    dataset    = MangaDataset(args.path, crop_size=args.crop_size,
-                               hint_prob=args.hint_prob, max_hints=args.max_hints)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size,
-                            shuffle=True, num_workers=args.workers,
-                            pin_memory=(device == 'cuda'), drop_last=True)
+    # ── Agrupar variantes por imagen original ─────────────────────────────────
+    color_dir       = os.path.join(args.path, 'color')
+    all_color_paths = _list_images(color_dir)
+    if not all_color_paths:
+        raise FileNotFoundError(f"No se encontraron imágenes en {color_dir}")
 
-    # Modelos
+    groups = _group_by_original(all_color_paths, args.mult_number)
+    print(f"[Dataset] {len(all_color_paths)} ficheros | "
+          f"{len(groups)} imágenes originales | "
+          f"mult_number={args.mult_number}")
+
+    # ── Dataset y DataLoader ──────────────────────────────────────────────────
+    initial_paths = _sample_epoch_paths(groups)
+    dataset = MangaDataset(
+        args.path, crop_size=args.crop_size,
+        hint_prob=args.hint_prob, max_hints=args.max_hints,
+        active_paths=initial_paths,
+    )
+    dataloader = DataLoader(
+        dataset, batch_size=args.batch_size,
+        shuffle=True, num_workers=args.workers,
+        pin_memory=(device == 'cuda'), drop_last=True,
+    )
+
+    # ── Modelos ───────────────────────────────────────────────────────────────
     generator     = Generator().to(device)
     discriminator = Discriminator().to(device)
 
-    # Pesos pre-entrenados del generator
     if args.pretrained:
         state = torch.load(args.pretrained, map_location=device)
         generator.load_state_dict(state)
         print(f"[Train] Pesos del generator cargados: {args.pretrained}")
 
-    # Content loss VGG (opcional)
     content_net = ContentVGG().to(device) if args.content_loss else None
     if content_net:
         print("[Train] Perceptual loss VGG16 activado")
 
-    # Congelar encoder (útil para fine-tuning con pocos datos)
     if args.freeze_encoder:
         for p in generator.encoder.parameters():
             p.requires_grad = False
         print("[Train] Encoder SEResNeXt congelado")
 
-    # Optimizadores
+    # ── Optimizadores ─────────────────────────────────────────────────────────
     gen_params = filter(lambda p: p.requires_grad, generator.parameters())
     optG = optim.Adam(gen_params,                 lr=args.lr_gen,  betas=(0.5, 0.9))
     optD = optim.Adam(discriminator.parameters(), lr=args.lr_disc, betas=(0.5, 0.9))
 
-    # Reanudar checkpoint
+    # ── Reanudar checkpoint ───────────────────────────────────────────────────
     start_epoch = 0
     if args.resume:
         ckpt = torch.load(args.resume, map_location=device)
@@ -311,10 +400,18 @@ def train(args):
         start_epoch = ckpt['epoch'] + 1
         print(f"[Train] Reanudando desde epoch {start_epoch}")
 
-    # Bucle principal
+    # ── Bucle principal ───────────────────────────────────────────────────────
     disc_turn = True
 
     for epoch in range(start_epoch, args.epochs):
+
+        # Rotar variantes: cada epoch se escoge aleatoriamente una variante
+        # distinta por imagen original → el modelo nunca ve la misma variante
+        # dos epochs seguidos (con alta probabilidad)
+        epoch_paths = _sample_epoch_paths(groups)
+        dataset.set_active_paths(epoch_paths)
+        print(f"[Epoch {epoch}] {len(epoch_paths)} imágenes activas "
+              f"(1 variante aleatoria por original)")
 
         if epoch == args.lr_decay_epoch > 0:
             for g in optG.param_groups: g['lr'] /= 10
@@ -327,11 +424,11 @@ def train(args):
         sum_g, sum_d, n_g, n_d = 0.0, 0.0, 0, 0
 
         for step, (gen_input, real_color) in enumerate(dataloader):
-            gen_input  = gen_input.to(device)    # [B, 5, H, W]
-            real_color = real_color.to(device)   # [B, 3, H, W]
+            gen_input  = gen_input.to(device)
+            real_color = real_color.to(device)
 
             if disc_turn:
-                # ── Paso Discriminador ──────────────────────────────────────
+                # ── Paso Discriminador ────────────────────────────────────────
                 for p in discriminator.parameters(): p.requires_grad = True
                 for p in generator.parameters():     p.requires_grad = False
                 discriminator.zero_grad()
@@ -348,7 +445,7 @@ def train(args):
                 sum_d += d_loss.item(); n_d += 1
 
             else:
-                # ── Paso Generator ──────────────────────────────────────────
+                # ── Paso Generator ────────────────────────────────────────────
                 for p in discriminator.parameters(): p.requires_grad = False
                 for p in generator.parameters():     p.requires_grad = True
                 generator.zero_grad()
@@ -370,22 +467,26 @@ def train(args):
                 print(f"  [{ts}] Epoch {epoch:3d}  Step {step:5d}  "
                       f"D: {sum_d/(n_d+1e-8):.4f}  G: {sum_g/(n_g+1e-8):.4f}")
 
-        # Guardar checkpoint completo
-        ckpt_path = f"checkpoint_epoch{epoch}.pth"
-        torch.save({
-            'epoch': epoch,
-            'generator':     generator.state_dict(),
-            'discriminator': discriminator.state_dict(),
-            'optG': optG.state_dict(),
-            'optD': optD.state_dict(),
-        }, ckpt_path)
-
-        # Guardar solo generator (listo para usar con colorizator.py)
-        gen_path = f"generator_epoch{epoch}.pth"
-        torch.save(generator.state_dict(), gen_path)
-
         print(f"\n[Epoch {epoch}] D: {sum_d/(n_d+1e-8):.4f}  G: {sum_g/(n_g+1e-8):.4f}")
-        print(f"  Guardado: {ckpt_path}  |  {gen_path}\n")
+
+        # ── Guardar checkpoints ───────────────────────────────────────────────
+        if (epoch + 1) % args.save_every == 0 or epoch == args.epochs - 1:
+            ckpt_path = os.path.join(args.output_dir, f"checkpoint_epoch{epoch}.pth")
+            torch.save({
+                'epoch': epoch,
+                'generator':     generator.state_dict(),
+                'discriminator': discriminator.state_dict(),
+                'optG': optG.state_dict(),
+                'optD': optD.state_dict(),
+            }, ckpt_path)
+
+            gen_path = os.path.join(args.output_dir, f"generator_epoch{epoch}.pth")
+            torch.save(generator.state_dict(), gen_path)
+
+            print(f"  Guardado: {ckpt_path}  |  {gen_path}")
+            cleanup_checkpoints(args.output_dir, args.keep_last)
+
+        print()
 
     print("[Train] Entrenamiento completado.")
 
@@ -396,7 +497,10 @@ def train(args):
 
 def parse_args():
     p = argparse.ArgumentParser(description="Entrenamiento Manga Colorization V2")
-    p.add_argument('--path',           required=True,           help="Ruta al dataset (con subcarpeta color/)")
+    p.add_argument('--path',           required=True,
+                   help="Ruta al dataset (con subcarpeta color/)")
+    p.add_argument('--output_dir',     type=str,   default='',
+                   help="Directorio donde guardar checkpoints (default: directorio actual)")
     p.add_argument('--gpu',            action='store_true',     help="Usar CUDA")
     p.add_argument('--epochs',         type=int,   default=20,  help="Epochs (default: 20)")
     p.add_argument('--batch_size',     type=int,   default=2,   help="Batch size (default: 2)")
@@ -411,11 +515,26 @@ def parse_args():
     p.add_argument('--resume',         type=str,   default='',  help="checkpoint_epochN.pth para reanudar")
     p.add_argument('--freeze_encoder', action='store_true',     help="Congelar encoder SEResNeXt (fine-tuning)")
     p.add_argument('--content_loss',   action='store_true',     help="Activar perceptual loss VGG16")
+    # ── Nuevos argumentos ─────────────────────────────────────────────────────
+    p.add_argument('--save_every',  type=int, default=1,
+                   help="Guardar checkpoint cada N epochs (default: 1)")
+    p.add_argument('--keep_last',   type=int, default=0,
+                   help="Mantener solo los N checkpoints más recientes, 0=todos (default: 0)")
+    p.add_argument('--mult_number', type=int, default=1,
+                   help="Nº de variantes por imagen original generadas con prepare_dataset.py "
+                        "--multiply. Cada epoch se escoge una variante aleatoria distinta "
+                        "por imagen original (default: 1 = sin variantes)")
     return p.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_args()
+
     if args.crop_size % 32 != 0:
         raise ValueError(f"--crop_size debe ser divisible por 32, recibido: {args.crop_size}")
+
+    if not args.output_dir:
+        args.output_dir = os.getcwd()
+    os.makedirs(args.output_dir, exist_ok=True)
+
     train(args)
