@@ -1,0 +1,5 @@
+-r requirements.txt
+opencv-contrib-python
+Pillow
+transformers
+segment-anything
