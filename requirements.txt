@@ -2,3 +2,5 @@ torch
 torchvision
 opencv-python
 matplotlib
+tqdm
+pytest
