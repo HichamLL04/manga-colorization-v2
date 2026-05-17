@@ -1,6 +1,9 @@
 import numpy as np
 import cv2
 
+def multiple_of_32(value):
+    return int(np.ceil(value / 32) * 32)
+
 def resize_pad(img, size = 256):
             
     if len(img.shape) == 2:
@@ -20,8 +23,7 @@ def resize_pad(img, size = 256):
         width = int(np.ceil(img.shape[1] / ratio))
         img = cv2.resize(img, (width, int(size * 1.5)), interpolation = cv2.INTER_AREA)
 
-        
-        new_width = width + (32 - width % 32)
+        new_width = multiple_of_32(width)
             
         pad = (0, new_width - width)
         
@@ -32,7 +34,7 @@ def resize_pad(img, size = 256):
         height = int(np.ceil(img.shape[0] / ratio))
         img = cv2.resize(img, (size, height), interpolation = cv2.INTER_AREA)
 
-        new_height = height + (32 - height % 32)
+        new_height = multiple_of_32(height)
             
         pad = (new_height - height, 0)
         
