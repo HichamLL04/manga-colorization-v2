@@ -183,12 +183,12 @@ class FeatureConv(nn.Module):
         return self.network(x)
     
 class Generator(nn.Module):
-    def __init__(self, ngf=64):
+    def __init__(self, ngf=64, input_channels=5):
         super(Generator, self).__init__()
 
         self.encoder = SEResNeXt_Origin(BottleneckX_Origin, [3, 4, 6, 3], num_classes= 370, input_channels=1)
         
-        self.to0 =  self._make_encoder_block_first(5, 32)
+        self.to0 =  self._make_encoder_block_first(input_channels, 32)
         self.to1 = self._make_encoder_block(32, 64)
         self.to2 = self._make_encoder_block(64, 92)
         self.to3 = self._make_encoder_block(92, 128)
@@ -309,10 +309,10 @@ class Generator(nn.Module):
 
 
 class Colorizer(nn.Module):
-    def __init__(self):
+    def __init__(self, input_channels=5):
         super(Colorizer, self).__init__()
         
-        self.generator = Generator()
+        self.generator = Generator(input_channels=input_channels)
         
     def forward(self, x, extractor_grad = False):
         fake, guide = self.generator(x)
