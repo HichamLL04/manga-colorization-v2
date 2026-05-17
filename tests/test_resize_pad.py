@@ -51,3 +51,31 @@ def test_colorize_crops_padding():
     result = colorizator.colorize()
 
     assert result.shape == (54, 76, 3)
+
+
+def test_colorize_with_autohint_builds_dense_internal_hint():
+    torch = pytest.importorskip('torch')
+    from colorizator import MangaColorizator
+
+    class DummyColorizer:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, inputs):
+            self.calls += 1
+            batch, _, height, width = inputs.shape
+            return torch.zeros(batch, 3, height, width), None
+
+    colorizator = MangaColorizator.__new__(MangaColorizator)
+    colorizator.colorizer = DummyColorizer()
+    colorizator.device = 'cpu'
+    colorizator.current_image = torch.zeros(1, 1, 64, 96)
+    colorizator.current_hint = torch.zeros(1, 4, 64, 96)
+    colorizator.current_pad = (10, 20)
+
+    result = colorizator.colorize_with_autohint()
+
+    assert colorizator.colorizer.calls == 2
+    assert colorizator.current_hint.shape == (1, 4, 64, 96)
+    assert torch.all(colorizator.current_hint[:, 3] == 1)
+    assert result.shape == (54, 76, 3)
