@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import ToTensor
 from tqdm import tqdm
 
-from colorizator import MangaColorizator
+from colorizator import MangaColorizator, generate_distance_field_map
 from utils.utils import resize_pad
 
 
@@ -29,12 +29,13 @@ PALETTE = {
 
 
 class MangaImageDataset(Dataset):
-    def __init__(self, image_paths, size, apply_denoise, denoise_sigma, denoiser):
+    def __init__(self, image_paths, size, apply_denoise, denoise_sigma, denoiser, include_dfm):
         self.image_paths = image_paths
         self.size = size
         self.apply_denoise = apply_denoise
         self.denoise_sigma = denoise_sigma
         self.denoiser = denoiser
+        self.include_dfm = include_dfm
         self.transform = ToTensor()
 
     def __len__(self):
@@ -51,6 +52,9 @@ class MangaImageDataset(Dataset):
 
             image, pad = resize_pad(image, self.size)
             tensor = self.transform(image).float()
+            if self.include_dfm:
+                dfm = generate_distance_field_map(image)
+                tensor = torch.cat([tensor, torch.from_numpy(dfm).unsqueeze(0).float()], 0)
             hint = torch.zeros(4, tensor.shape[1], tensor.shape[2]).float()
 
             return {
@@ -76,6 +80,9 @@ def process_image(image, colorizator, args):
     if args.interactive_hints:
         hint, mask = collect_interactive_hint(colorizator.current_image, args.hint_threshold)
         colorizator.update_hint(hint, mask)
+
+    if args.autohint:
+        return colorizator.colorize_with_autohint()
 
     return colorizator.colorize()
 
@@ -105,6 +112,7 @@ def colorize_images(target_path, colorizator, args):
             args.denoiser,
             args.denoiser_sigma,
             colorizator.denoiser,
+            colorizator.use_dfm,
         )
         loader = DataLoader(
             dataset,
@@ -127,7 +135,10 @@ def colorize_images(target_path, colorizator, args):
                     [item['hint'] for item in items],
                     [item['pad'] for item in items],
                 )
-                colorizations = colorizator.colorize_batch(images, hints, pads)
+                if args.autohint:
+                    colorizations = colorizator.colorize_batch_with_autohint(images, hints, pads)
+                else:
+                    colorizations = colorizator.colorize_batch(images, hints, pads)
                 for item, colorization in zip(items, colorizations):
                     save_path = build_save_path(target_path, item['path'])
                     save_result(item['original'], colorization, save_path, args.compare)
@@ -266,6 +277,8 @@ def validate_args(args):
         raise ValueError('--workers no puede ser negativo.')
     if args.interactive_hints and args.batch_size != 1:
         print('Aviso: --interactive_hints procesa una imagen por vez; --batch_size se ignora.', file=sys.stderr)
+    if args.interactive_hints and args.autohint:
+        raise ValueError('--autohint no se puede combinar con --interactive_hints porque reemplaza los hints manuales.')
 
 
 def parse_args():
@@ -288,6 +301,7 @@ def parse_args():
     parser.add_argument('--compare', action='store_true', help='Guarda original BN y colorizacion lado a lado.')
     parser.add_argument('--interactive_hints', action='store_true', help='Activa clicks por region y paleta basica.')
     parser.add_argument('--hint_threshold', type=int, default=10, help='Tolerancia de flood fill para hints interactivos.')
+    parser.add_argument('--autohint', action='store_true', help='Ejecuta una segunda pasada con hint denso generado desde la primera colorizacion.')
     parser.set_defaults(gpu=False)
     parser.set_defaults(denoiser=True)
     args = parser.parse_args()
