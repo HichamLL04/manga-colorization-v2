@@ -1,5 +1,6 @@
 import torch
 from torchvision.transforms import ToTensor
+import torch.nn.functional as F
 import numpy as np
 
 from networks.models import Colorizer
@@ -60,3 +61,38 @@ class MangaColorizator:
             result = result[:, :-self.current_pad[1]]
             
         return result.numpy()
+
+    def colorize_batch(self, images, hints, pads):
+        with torch.no_grad():
+            fake_color, _ = self.colorizer(torch.cat([images, hints], 1))
+            fake_color = fake_color.detach()
+
+        results = []
+        for index, image in enumerate(fake_color):
+            result = image.detach().cpu().permute(1, 2, 0) * 0.5 + 0.5
+            pad_h, pad_w = pads[index]
+
+            if pad_h != 0:
+                result = result[:-pad_h]
+            if pad_w != 0:
+                result = result[:, :-pad_w]
+
+            results.append(result.numpy())
+
+        return results
+
+    def pad_batch(self, images, hints, pads):
+        max_height = max(image.shape[1] for image in images)
+        max_width = max(image.shape[2] for image in images)
+        padded_images = []
+        padded_hints = []
+        padded_pads = []
+
+        for image, hint, pad in zip(images, hints, pads):
+            extra_h = max_height - image.shape[1]
+            extra_w = max_width - image.shape[2]
+            padded_images.append(F.pad(image, (0, extra_w, 0, extra_h), mode='replicate'))
+            padded_hints.append(F.pad(hint, (0, extra_w, 0, extra_h)))
+            padded_pads.append((pad[0] + extra_h, pad[1] + extra_w))
+
+        return torch.stack(padded_images).to(self.device), torch.stack(padded_hints).to(self.device), padded_pads
