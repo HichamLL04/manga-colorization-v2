@@ -4,3 +4,4 @@ opencv-python
 matplotlib
 tqdm
 pytest
+snowy
