@@ -26,6 +26,7 @@ def main(argv=None):
     color.add_argument("output")
     color.add_argument("--checkpoint", default="v2generator.zip")
     color.add_argument("--hints", help="PNG RGBA del tamaño de la imagen; alfa = máscara")
+    color.add_argument("--points", nargs="*", default=[], help="Puntos de color 'x,y:#RRGGBB' o 'x,y,radio:#RRGGBB'")
     color.add_argument("--palette", nargs="*", default=[])
     color.add_argument("--palette-mode", choices=["hints", "learned"], default="hints")
     color.add_argument("--lock-hints", action="store_true", help="Fijar exactamente las zonas pintadas tras inferencia")
@@ -130,6 +131,19 @@ def main(argv=None):
 
             input_img = open_rgb(args.input)
             hints_img = Image.open(args.hints).convert("RGBA") if args.hints else None
+            if args.points:
+                from PIL import ImageDraw
+                if hints_img is None:
+                    hints_img = Image.new("RGBA", input_img.size, (0, 0, 0, 0))
+                draw = ImageDraw.Draw(hints_img)
+                for pt in args.points:
+                    coords, hex_col = pt.split(":")
+                    parts = [int(v.strip()) for v in coords.split(",")]
+                    px, py = parts[0], parts[1]
+                    radius = parts[2] if len(parts) > 2 else 8
+                    clean = hex_col.strip().lstrip("#")
+                    cr, cg, cb = int(clean[0:2], 16), int(clean[2:4], 16), int(clean[4:6], 16)
+                    draw.ellipse([px - radius, py - radius, px + radius, py + radius], fill=(cr, cg, cb, 255))
             palette_vals = parse_palette(args.palette)
             export_dim = parse_export_size(args.export_size)
 
