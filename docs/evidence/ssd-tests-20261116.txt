@@ -1,0 +1,5 @@
+Fecha local: 2026-11-16 Europe/Madrid
+Comando: .venv/Scripts/python.exe -m pytest -q --basetemp tmp/ssd_full_tests_20261116 --tb=short
+
+..............................                                           [100%]
+30 passed in 15.36s

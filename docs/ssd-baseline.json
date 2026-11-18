@@ -1,0 +1,113 @@
+{
+  "schema": "mangacolor.ssd_baseline.v1",
+  "date": "2026-11-16",
+  "project_version": "0.1.0",
+  "test_result": "30 passed in 15.36s",
+  "files": [
+    {
+      "path": "pyproject.toml",
+      "sha256": "b6a6c381e59f9ec6141ef3dcb52d285bd49b7e594fe9c1bba06a16231ef1bb63",
+      "bytes": 622
+    },
+    {
+      "path": "README.md",
+      "sha256": "8117f4a1cc18fe08e07697db18c526ceb4ede3fa9c1bd8ea3c91449eea7c45f6",
+      "bytes": 9737
+    },
+    {
+      "path": "mangacolor/__init__.py",
+      "sha256": "164215ddfa109f85ef0ef187f2571e7c894ab353e31e5736dea1454fd3cd937e",
+      "bytes": 101
+    },
+    {
+      "path": "mangacolor/__main__.py",
+      "sha256": "19f07de3d1765a6803d4332ab1e67346381236f7769f47640e73849922394790",
+      "bytes": 62
+    },
+    {
+      "path": "mangacolor/checkpoints.py",
+      "sha256": "1a98474e697f66d0b7608e36fd3b53f45a61d4665b541632b413aa1bde398157",
+      "bytes": 7059
+    },
+    {
+      "path": "mangacolor/cli.py",
+      "sha256": "636c413de5f823bbffb4e10c32093bcd02379dec2cc1eb4232536ec1933d8bdc",
+      "bytes": 5922
+    },
+    {
+      "path": "mangacolor/data.py",
+      "sha256": "054642229a5abf0e0bc865d50ec430de4527e3f6165cc9c9cf3f681f6beae467",
+      "bytes": 19832
+    },
+    {
+      "path": "mangacolor/editor.py",
+      "sha256": "dfd42561299f7c73bc278853f50e3df6e3a281b3157453d1328f062b62488b83",
+      "bytes": 3214
+    },
+    {
+      "path": "mangacolor/inference.py",
+      "sha256": "6d1e884b2b4b3fbc50bc2cfed1e247a048dcb3e91c836d51d38cfa97cc4a700a",
+      "bytes": 8749
+    },
+    {
+      "path": "mangacolor/model.py",
+      "sha256": "f259e04d554a52726d39f2c610358d72d4f2c62231d859ed5ecc5e3eb9ffc1a0",
+      "bytes": 5579
+    },
+    {
+      "path": "mangacolor/training.py",
+      "sha256": "6e8ede11d26180b769c69ce6f1f81bb3b39681ce9a82406cbefe1efec0628d58",
+      "bytes": 8529
+    },
+    {
+      "path": "mangacolor/vendor/v2/__init__.py",
+      "sha256": "fcbe34712effed5571a7071423e53636f843a2f26b821db196d5bf66e7d104dc",
+      "bytes": 147
+    },
+    {
+      "path": "mangacolor/vendor/v2/extractor.py",
+      "sha256": "38b2f7c6c41eeafcdc5390820113259938c7fc8de2d3567079185f237fafa8bb",
+      "bytes": 4243
+    },
+    {
+      "path": "mangacolor/vendor/v2/models.py",
+      "sha256": "0be9a483fe970da8a79e9cf3749a00b5462e6b68921e6a2c6fe214b3f3594d8f",
+      "bytes": 13550
+    },
+    {
+      "path": "mangacolor/web/editor.html",
+      "sha256": "6790b853c658ff4ceac9fcba271b5e523180867a1e57278f063b0e16831fb5cc",
+      "bytes": 9752
+    },
+    {
+      "path": "tests/test_data.py",
+      "sha256": "11159c347b755fada5b13100fb52ea1567477f66b401521adc68cbdbcf449553",
+      "bytes": 10648
+    },
+    {
+      "path": "tests/test_editor.py",
+      "sha256": "9f9c2073a0fec0f6ee0e02db8038303d60b932be3b6d20d72d485051f5570856",
+      "bytes": 3095
+    },
+    {
+      "path": "tests/test_inference.py",
+      "sha256": "04a98fbbec60d3331f818a14729f7749156ec2b82ef88cdb4c9fd7d4e7a2aba9",
+      "bytes": 4397
+    },
+    {
+      "path": "tests/test_model.py",
+      "sha256": "e637ae94a50968e53d5d2210dba7007ebd5b815dbbfb85f389b262bb6a6f8372",
+      "bytes": 6085
+    },
+    {
+      "path": "output/verification/model_verification.json",
+      "sha256": "455653eab02a6259669e1d2586722fefe936ae834bf99813f34b41005a3ed15f",
+      "bytes": 999
+    },
+    {
+      "path": "output/pipeline_check/verification.json",
+      "sha256": "2d833a5865fbdc86b70c3775b5868d46b7365c4322dc72df52e655067d9a03e5",
+      "bytes": 563
+    }
+  ]
+}

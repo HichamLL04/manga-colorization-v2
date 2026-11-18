@@ -1,0 +1,34 @@
+{
+  "schema": "mangacolor.ssd_delivery.v1",
+  "date": "2026-11-16",
+  "pages": 33,
+  "sections": 32,
+  "requirements": 84,
+  "checks": {
+    "all_requirement_ids_in_pdf": true,
+    "text_within_page_bounds": true
+  },
+  "issues": [],
+  "files": [
+    {
+      "path": "docs/SSD.md",
+      "bytes": 85193,
+      "sha256": "39f3017ff49caffdfe91bf46273ae162a70083fb43262c4b694eed05e6fe2a29"
+    },
+    {
+      "path": "output/pdf/SSD_MangaColor_v1.pdf",
+      "bytes": 207282,
+      "sha256": "a788751e9b13bf8207975b90ec3b518a64be20f48ea60b625f9509943e1c6aab"
+    },
+    {
+      "path": "docs/ssd-baseline.json",
+      "bytes": 3594,
+      "sha256": "3bbaf46beb228b1b4bb977482992f759db43486c170c5d7bf78ac6380565ced8"
+    },
+    {
+      "path": "docs/evidence/ssd-tests-20261116.txt",
+      "bytes": 241,
+      "sha256": "e941b594acf4eaa621c92166c2a600d6f3e69582a9f114a7172a4c4b305a94ac"
+    }
+  ]
+}

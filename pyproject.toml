@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mangacolor-control"
+version = "0.1.0"
+description = "Colorización de manga con pistas regionales, paletas y entrenamiento compatible con v2"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.6,<3", "numpy>=1.26,<3", "Pillow>=10,<13"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+mangacolor = "mangacolor.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["mangacolor*"]
+
+[tool.setuptools.package-data]
+mangacolor = ["web/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

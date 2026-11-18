@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MangaColor · Color y control</title>
+<style>
+[hidden]{display:none!important}
+:root{color-scheme:dark;font:15px/1.5 system-ui,sans-serif;background:#12161d;color:#e8ecf4}*{box-sizing:border-box}body{margin:0}header{padding:22px 28px;border-bottom:1px solid #303845;display:flex;justify-content:space-between;align-items:center}h1{font-size:22px;margin:0}header span{color:#92a2b9;font-size:13px}main{display:grid;grid-template-columns:280px 1fr;min-height:calc(100vh - 80px)}aside{padding:24px;background:#191f28;border-right:1px solid #303845}label{display:block;margin:18px 0 6px;font-size:13px;color:#b8c6da}input,select,button{font:inherit}button,select,input[type=file],input[type=text]{background:#252e3b;border:1px solid #435169;color:#f4f7fc;padding:9px;border-radius:6px;max-width:100%}button{cursor:pointer}button:hover{border-color:#a6bcdf}button:disabled{opacity:.5;cursor:wait}.primary{background:#b8e896;color:#162314;border:0;font-weight:650;width:100%;margin-top:24px}input[type=color]{width:60px;height:36px;border:0;background:none;vertical-align:middle}input[type=range]{width:140px}.note{font-size:12px;color:#96a7be}section{padding:24px;min-width:0}.tools{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}.boards{display:grid;grid-template-columns:1fr 1fr;gap:20px}.board{min-width:0}h2{font-size:14px;color:#a8b9cf;font-weight:500}.stage{position:relative;max-width:100%;background:#222b38;min-height:320px;border-radius:6px;overflow:hidden}.stage canvas{display:block;width:100%;height:auto}.stage #hints{position:absolute;inset:0;touch-action:none;cursor:crosshair}#result{display:block;width:100%;height:auto}#empty{padding:50px 25px;text-align:center;color:#96a7be}#status{margin-top:20px;white-space:pre-wrap;color:#b8e896}a{color:#b8e896}.check{display:flex;gap:8px;align-items:flex-start}#swatches{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.swatch{height:24px;width:24px;border:1px solid #8797ac;border-radius:4px}@media(max-width:900px){main{grid-template-columns:1fr}aside{border-right:0}.boards{grid-template-columns:1fr}header span{display:none}}
+</style>
+<header><h1>MangaColor <span> / Color y control</span></h1><span>Procesamiento local · v2 + pistas regionales</span></header>
+<main><aside>
+<label for="upload">Página o ilustración</label><input id="upload" type="file" accept="image/*">
+<label for="color">Color del pincel</label><input id="color" type="color" value="#e29e75">
+<label for="radius">Grosor <span id="radiusText">20 px</span></label><input id="radius" type="range" min="1" max="120" value="20">
+<label for="tool">Herramienta</label><select id="tool"><option value="brush">Pincel</option><option value="fill">Rellenar zona cerrada</option><option value="erase">Borrador</option></select>
+<label for="palette">Paleta global · colores HEX separados por coma</label><input id="palette" type="text" placeholder="#e29e75, #3267a8"><div id="swatches"></div>
+<label for="mode">Aplicación de paleta</label><select id="mode"><option value="hints">v2 · pistas automáticas aproximadas</option id="learned" value="learned" disabled>Adaptador entrenado</option></select>
+<p class="note">La paleta global no asigna colores a objetos. Pinta una zona para indicar dónde debe ir un color.</p>
+<label class="check"><input type="checkbox" id="lock">Fijar color exacto en zonas pintadas</label>
+<p class="note">Esta opción aplica la máscara después de la predicción. Sin ella puedes evaluar la respuesta real del modelo.</p>
+<label class="check"><input type="checkbox" id="ink" checked>Conservar tinta negra</label>
+<label for="size">Resolución de cálculo · lado mayor</label><select id="size"><option>256</option><option selected>576</option><option>768</option><option>1024</option></select>
+<button id="run" class="primary" disabled>Colorear página</button>
+<div id="status" role="status" aria-live="polite">Carga una imagen para empezar.</div>
+</aside><section>
+<div class="tools"><button id="undo" disabled>Deshacer trazo</button><button id="clear" disabled>Limpiar pistas</button><button id="saveHints" disabled>Guardar pistas PNG</button><button id="saveResult" disabled>Descargar resultado</button></div>
+<div class="boards"><div class="board"><h2>Original + pistas de color</h2><div class="stage"><canvas id="base" hidden></canvas><canvas id="hints" hidden></canvas><div id="empty">Pinta puntos, trazos o zonas.<br>Las pistas conservan sus coordenadas originales.</div></div></div><div class="board"><h2>Resultado</h2><div class="stage"><img id="result" alt="Resultado de la colorización" hidden></div></div></div>
+</section></main>
+<script>
+const $=id=>document.getElementById(id), base=$('base'), hints=$('hints'),ctx=hints.getContext('2d',{willReadFrequently:true});
+let history=[],drawing=false,ready=false,resultURL=null,busy=false;
+const status=text=>$('status').textContent=text;
+function snapshot(){history.push(ctx.getImageData(0,0,hints.width,hints.height));if(history.length>8)history.shift();$('undo').disabled=false}
+function point(event){const r=hints.getBoundingClientRect();return [(event.clientX-r.left)*hints.width/r.width,(event.clientY-r.top)*hints.height/r.height]}
+function download(url,name){const a=document.createElement('a');a.href=url;a.download=name;a.click()}
+$('upload').onchange=()=>{const file=$('upload').files[0];if(!file)return;const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{if(img.width*img.height>25000000){status('La imagen supera 25 millones de píxeles.');URL.revokeObjectURL(url);return}for(const c of [base,hints]){c.width=img.width;c.height=img.height;c.hidden=false}const bc=base.getContext('2d');bc.fillStyle='white';bc.fillRect(0,0,base.width,base.height);bc.drawImage(img,0,0);history=[];ready=true;resultURL=null;$('result').hidden=true;$('saveResult').disabled=true;$('undo').disabled=true;for(const id of ['run','clear','saveHints'])$(id).disabled=false;$('empty').hidden=true;status('Pinta pistas o colorea directamente.');URL.revokeObjectURL(url)};img.onerror=()=>{status('No se pudo abrir la imagen.');URL.revokeObjectURL(url)};img.src=url};
+$('radius').oninput=()=>$('radiusText').textContent=$('radius').value+' px';
+$('palette').oninput=()=>{const sw=$('swatches');sw.replaceChildren();for(const color of $('palette').value.split(',').map(x=>x.trim()).filter(x=>/^#[0-9a-f]{6}$/i.test(x))){const s=document.createElement('div');s.className='swatch';s.style.background=color;sw.append(s)}};
+function fill(x,y){x=Math.max(0,Math.min(base.width-1,Math.floor(x)));y=Math.max(0,Math.min(base.height-1,Math.floor(y)));const w=base.width,h=base.height,source=base.getContext('2d').getImageData(0,0,w,h).data,visited=new Uint8Array(w*h),queue=new Int32Array(w*h),out=ctx.getImageData(0,0,w,h),hex=$('color').value, rgb=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16));let read=0,write=0;queue[write++]=y*w+x;visited[y*w+x]=1;while(read<write){const p=queue[read++],i=p*4,luma=.299*source[i]+.587*source[i+1]+.114*source[i+2];if(luma<95)continue;out.data[i]=rgb[0];out.data[i+1]=rgb[1];out.data[i+2]=rgb[2];out.data[i+3]=255;const px=p%w;for(const q of [px>0?p-1:-1,px<w-1?p+1:-1,p>=w?p-w:-1,p<w*(h-1)?p+w:-1])if(q>=0&&!visited[q]){visited[q]=1;queue[write++]=q}}ctx.putImageData(out,0,0);status('Zona rellenada. Si el contorno está abierto, deshaz y usa el pincel.')}
+hints.onpointerdown=e=>{if(!ready||busy)return;e.preventDefault();snapshot();const [x,y]=point(e);if($('tool').value==='fill'){fill(x,y);return}drawing=true;hints.setPointerCapture(e.pointerId);ctx.globalCompositeOperation=$('tool').value==='erase'?'destination-out':'source-over';ctx.strokeStyle=$('color').value;ctx.fillStyle=$('color').value;ctx.lineWidth=+$('radius').value;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.arc(x,y,ctx.lineWidth/2,0,2*Math.PI);ctx.fill();ctx.beginPath();ctx.moveTo(x,y)};
+hints.onpointermove=e=>{if(!drawing)return;const [x,y]=point(e);ctx.lineTo(x,y);ctx.stroke()};
+const end=()=>{drawing=false;ctx.globalCompositeOperation='source-over'};hints.onpointerup=end;hints.onpointercancel=end;
+$('undo').onclick=()=>{if(history.length)ctx.putImageData(history.pop(),0,0);$('undo').disabled=!history.length};
+$('clear').onclick=()=>{snapshot();ctx.clearRect(0,0,hints.width,hints.height)};
+$('saveHints').onclick=()=>download(hints.toDataURL('image/png'),'pistas.png');
+$('saveResult').onclick=()=>{if(resultURL)download(resultURL,'colorizacion.png')};
+$('run').onclick=async()=>{busy=true;for(const id of ['run','upload','undo','clear'])$(id).disabled=true;status('Coloreando…');try{const response=await fetch('/colorize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:base.toDataURL('image/png'),hints:hints.toDataURL('image/png'),palette:$('palette').value.split(',').map(x=>x.trim()).filter(Boolean),palette_mode:$('mode').value,size:+$('size').value,lock_hints:$('lock').checked,preserve_ink:$('ink').checked})});const data=await response.json();if(!response.ok)throw Error(data.error);resultURL=data.image;$('result').src=resultURL;$('result').hidden=false;$('saveResult').disabled=false;status('Página lista. '+(data.report.palette_mode==='native_sparse_hints'?'Paleta aplicada mediante pistas aproximadas.':data.report.palette_mode==='learned'?'Adaptador de paleta utilizado.':''))}catch(e){status('Error: '+e.message)}finally{busy=false;for(const id of ['run','upload','clear'])$(id).disabled=false;$('undo').disabled=!history.length}};
+fetch('/capabilities').then(r=>r.json()).then(meta=>{$('learned').disabled=!meta.palette_trained}).catch(()=>status('No se pudo conectar con el editor local.'));
+</script>
+</html>
