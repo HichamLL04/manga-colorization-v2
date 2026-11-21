@@ -28,12 +28,17 @@ def color_losses(prediction, guide, batch):
     valid = batch["palette_mask"].bool()
     distance = distance.masked_fill(~valid[:, None], 1e4)
     palette_loss = distance.min(-1).values.mean(-1) * valid.any(-1)
+    # Anti-desaturation chroma penalty: prevents L1 collapse to dull gray on colorful regions
+    pred_chroma = prediction.max(1).values - prediction.min(1).values
+    tgt_chroma = target.max(1).values - target.min(1).values
+    chroma_loss = (tgt_chroma - pred_chroma).clamp_min(0).mean((1, 2))
     # Prefer real labels over unreviewed teacher outputs.
     weight = batch.get("weight", torch.ones_like(per_image)).reshape(-1)
     reduce = lambda value: (value * weight).mean()
     parts = {"reconstruction": reduce(per_image), "guide": reduce(guide_loss),
-             "hint": reduce(hint_loss), "palette": reduce(palette_loss)}
-    parts["total"] = parts["reconstruction"] + .3 * parts["guide"] + 2 * parts["hint"] + .1 * parts["palette"]
+             "hint": reduce(hint_loss), "palette": reduce(palette_loss),
+             "chroma": reduce(chroma_loss)}
+    parts["total"] = parts["reconstruction"] + .3 * parts["guide"] + 2 * parts["hint"] + .1 * parts["palette"] + .8 * parts["chroma"]
     return parts
 
 
