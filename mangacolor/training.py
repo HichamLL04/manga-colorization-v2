@@ -106,6 +106,7 @@ def train(args):
     (output / "config.json").write_text(json.dumps(configuration, indent=2), encoding="utf-8")
     updates = 0
     palette_updates = int(metadata.get("palette_updates", 0))
+    best_val_loss = float("inf")
     log = output / "metrics.jsonl"
     for epoch in range(start_epoch, start_epoch + args.epochs):
         if hasattr(dataset, "set_epoch"):
@@ -147,9 +148,14 @@ def train(args):
                         palette_updates=palette_updates, validation=metrics)
         # Epoch-level resume intentionally starts a fresh shuffled epoch.
         save_checkpoint(output / "last.pt", model, metadata, optimizer, epoch=epoch + 1, step=step)
+        val_loss = metrics.get("total")
+        if val_loss is not None and val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_checkpoint(output / "best.pt", model, metadata, optimizer, epoch=epoch + 1, step=step)
         with log.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({"epoch": epoch, "validation": metrics}) + "\n")
         print(json.dumps({"checkpoint": str(output / "last.pt"), "validation": metrics}), flush=True)
         if args.max_steps and updates >= args.max_steps:
             break
-    return output / "last.pt"
+    best_file = output / "best.pt"
+    return best_file if best_file.exists() else output / "last.pt"
